@@ -6,7 +6,7 @@ import NotificationBar from './components/NotificationBar';
 import PaymentForm from './components/PaymentForm';
 
 // API Configuration
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 axios.defaults.baseURL = API_BASE_URL;
 
 // Auth Context
@@ -314,7 +314,7 @@ const EventCard = ({ event, onBooked }) => {
     setShowPayment(false);
     onBooked();
   };
-  
+
   if (showPayment) {
     return (
       <PaymentForm 

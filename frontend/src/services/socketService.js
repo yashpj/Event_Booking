@@ -9,7 +9,7 @@ class SocketService {
 
   connect() {
     if (!this.socket) {
-      this.socket = io('http://localhost:8000', {
+      this.socket = io(process.env.REACT_APP_API_URL || 'http://localhost:8000', {
         transports: ['websocket'],
         upgrade: false,
       });
