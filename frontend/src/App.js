@@ -504,6 +504,38 @@ const CreateEventForm = ({ onSuccess }) => {
   );
 };
 
+const SecureImage = ({ src, alt, style }) => {
+  const [imageSrc, setImageSrc] = useState(null);
+
+  useEffect(() => {
+    let objectUrl = null;
+
+    const fetchImage = async () => {
+      try {
+        // Fetch the binary data using axios (interceptors will add the token)
+        const response = await axios.get(src, { responseType: 'blob' });
+        
+        // Create a local URL for the downloaded blob
+        objectUrl = URL.createObjectURL(response.data);
+        setImageSrc(objectUrl);
+      } catch (error) {
+        console.error("Error loading protected image:", error);
+      }
+    };
+
+    if (src) fetchImage();
+
+    // Clean up the object URL to prevent memory leaks
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+
+  if (!imageSrc) return <span>Loading ticket...</span>;
+
+  return <img src={imageSrc} alt={alt} style={style} />;
+};
+
 // My Bookings Component
 const MyBookings = () => {
   const [bookings, setBookings] = useState([]);
@@ -541,7 +573,16 @@ const MyBookings = () => {
               <p><strong>Total Amount:</strong> ${booking.total_amount}</p>
               <p><strong>Status:</strong> <span className="status">{booking.status}</span></p>
               <p><strong>Booked on:</strong> {new Date(booking.booking_date).toLocaleDateString()}</p>
-            </div>
+              {booking.status === 'paid' && (
+                <div className="ticket-section">
+                  <h4>Your Entry Ticket:</h4>
+                  <SecureImage 
+                    src={`/bookings/${booking.id}/ticket`} 
+                    alt="QR Ticket"
+                    style={{ width: '200px', height: '200px' }}
+                  />
+                </div>
+              )}            </div>
           ))
         }
         </div>

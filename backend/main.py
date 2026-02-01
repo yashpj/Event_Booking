@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 from websocket_manager import sio, broadcast_new_event, broadcast_booking_update, broadcast_seats_update
 import socketio
 from payment_service import create_payment_intent, confirm_payment
+import qrcode
+import io
+from fastapi.responses import StreamingResponse
 
 # Load environment variables
 load_dotenv()
@@ -393,17 +396,35 @@ async def confirm_payment_status(
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     
-    # Verify payment with Stripe
     if await confirm_payment(booking.payment_intent_id):
-        # Update booking status
+        # ATOMIC UPDATE: Only update if seats are still available
+        result = db.query(Event).filter(
+            Event.id == booking.event_id,
+            Event.available_seats >= booking.seats
+        ).update(
+            {"available_seats": Event.available_seats - booking.seats},
+            synchronize_session=False
+        )
+        
+        if result == 0:
+            # This handles the rare case where payment succeeded but seats ran out
+            # TODO: Handle a refund
+            raise HTTPException(status_code=400, detail="Event sold out during payment processing")
+
         booking.status = "paid"
-        
-        # Update available seats
-        event = db.query(Event).filter(Event.id == booking.event_id).first()
-        event.available_seats -= booking.seats
-        
         db.commit()
+    
+    # # Verify payment with Stripe 
+    # if await confirm_payment(booking.payment_intent_id):
+    #     # Update booking status
+    #     booking.status = "paid"
+         
+    #     # Update available seats
+    #     event = db.query(Event).filter(Event.id == booking.event_id).first()
+    #     event.available_seats -= booking.seats
         
+    #     db.commit()
+        event = db.query(Event).filter(Event.id == booking.event_id).first()
         # Broadcast updates
         await broadcast_seats_update(
             event.id, 
@@ -422,6 +443,21 @@ def get_my_bookings(
 ):
     bookings = db.query(Booking).filter(Booking.user_id == current_user.id).all()
     return bookings
+
+@app.get("/bookings/{booking_id}/ticket")
+async def get_ticket_qr(booking_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    booking = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current_user.id).first()
+    if not booking or booking.status != "paid":
+        raise HTTPException(status_code=404, detail="Ticket not found or unpaid")
+    
+    # Data to encode in QR
+    data = f"TICKET:{booking.id}:{current_user.username}:{booking.event_id}"
+    qr = qrcode.make(data)
+    
+    buf = io.BytesIO()
+    qr.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
 
 if __name__ == "__main__":
     import uvicorn
