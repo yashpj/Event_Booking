@@ -17,6 +17,9 @@ from payment_service import create_payment_intent, confirm_payment
 import qrcode
 import io
 from fastapi.responses import StreamingResponse
+from fastapi import BackgroundTasks
+from email_service import send_ticket_email
+from sqlalchemy import func
 
 # Load environment variables
 load_dotenv()
@@ -384,6 +387,7 @@ async def create_stripe_payment(
 @app.post("/confirm-payment/{booking_id}")
 async def confirm_payment_status(
     booking_id: int,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -431,6 +435,14 @@ async def confirm_payment_status(
             event.available_seats, 
             event.total_seats
         )
+
+        background_tasks.add_task(
+            send_ticket_email, 
+            current_user.email, 
+            current_user.username, 
+            event.title, 
+            booking.id
+        )
         
         return {"status": "success", "booking": booking}
     else:
@@ -458,6 +470,30 @@ async def get_ticket_qr(booking_id: int, db: Session = Depends(get_db), current_
     qr.save(buf, format="PNG")
     buf.seek(0)
     return StreamingResponse(buf, media_type="image/png")
+
+@app.get("/admin/stats")
+def get_admin_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 1. Total Revenue from 'paid' bookings
+    revenue = db.query(func.sum(Booking.total_amount)).filter(Booking.status == "paid").scalar() or 0
+    
+    # 2. Total Tickets Sold
+    tickets_sold = db.query(func.count(Booking.id)).filter(Booking.status == "paid").count()
+    
+    # 3. Occupancy Data for Charting
+    events = db.query(Event).all()
+    chart_data = [
+        {
+            "name": e.title,
+            "sold": e.total_seats - e.available_seats,
+            "total": e.total_seats
+        } for e in events
+    ]
+    
+    return {
+        "revenue": revenue,
+        "tickets_sold": tickets_sold,
+        "chart_data": chart_data
+    }
 
 if __name__ == "__main__":
     import uvicorn
